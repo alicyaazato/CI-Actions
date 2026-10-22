@@ -1,0 +1,194 @@
+===========================================================
+ AST12 - Integração Contínua (CI) com GitHub Actions
+ Guia passo a passo (explicação simples)
+===========================================================
+
+O que já está pronto nesta pasta (AST12):
+  - main.py                          -> a API em FastAPI (rotas /, /somar e /multiplicar)
+  - test_main.py                     -> os testes automáticos (pytest)
+  - requirements.txt                 -> lista de pacotes que a API precisa
+  - .github/workflows/ci.yml         -> a receita do "Guarda-Costas" (GitHub Actions)
+
+Esses arquivos já estão na versão final e funcionando. O exercício pede para
+você simular erros de propósito em alguns momentos -> abaixo explico
+exatamente quando e como fazer isso, e como voltar ao normal depois.
+
+
+-----------------------------------------------------------
+PARTE 1 - Preparação (colocar o projeto no GitHub)
+-----------------------------------------------------------
+1. Abra o terminal dentro da pasta AST12.
+2. Se esta pasta ainda não for um repositório git próprio, rode:
+       git init
+       git add main.py test_main.py requirements.txt .github
+       git commit -m "Primeiro commit - API com CI"
+3. Crie um repositório vazio no site do GitHub (botão "New repository").
+   Não marque nenhuma opção de criar README/licença, para não dar conflito.
+4. Copie os comandos que o GitHub mostra para "subir um repositório
+   existente" (algo parecido com isto, troque pela SUA URL):
+       git remote add origin https://github.com/SEU-USUARIO/SEU-REPO.git
+       git branch -M main
+       git push -u origin main
+5. Vá até o GitHub, entre na aba "Actions" do seu repositório.
+   Você vai ver uma bolinha AMARELA (rodando). Clique nela para ver o
+   log do processo (o "Runner") até ficar VERDE (Success).
+   -> Isso significa que o workflow em .github/workflows/ci.yml rodou
+      os testes do pytest com sucesso.
+
+
+-----------------------------------------------------------
+PARTE 2 - Simulando um erro (o CI "pega" o bug)
+-----------------------------------------------------------
+Objetivo: ver o CI bloquear um código quebrado.
+
+1. Abra o arquivo main.py.
+2. Troque a soma por subtração só na rota /somar (de propósito):
+
+       @app.get("/somar/{a}/{b}")
+       def somar(a: int, b: int):
+           # ERRO INTENCIONAL AQUI: altere de + para -
+           return {"resultado": a - b}
+
+3. Salve, faça commit e push:
+       git add main.py
+       git commit -m "Erro intencional: subtraindo em vez de somar"
+       git push
+4. Vá na aba Actions do GitHub: o workflow vai FALHAR (X vermelho).
+5. Clique na execução que falhou, abra o passo "Rodar Testes" e leia o
+   log do pytest. Anote para a aula:
+     - Qual foi a mensagem exata de erro do Pytest?
+     - O que o teste esperava receber (ex: resultado 30) e o que
+       recebeu de fato (ex: resultado -10)?
+
+   (O teste que vai falhar é o test_somar, porque ele espera
+   {"resultado": 30} para /somar/10/20, e com o bug o resultado vira -10.)
+
+6. Agora DESFAÇA o erro: volte o "a - b" para "a + b" em main.py,
+   faça commit e push de novo, para o main voltar a ficar verde:
+       git add main.py
+       git commit -m "Corrige bug: volta soma para a + b"
+       git push
+
+
+-----------------------------------------------------------
+PARTE 3 - Trabalhando com branches e Pull Request
+-----------------------------------------------------------
+Na vida real não se dá push direto na main. Vamos proteger a branch e usar PR.
+
+1. No GitHub, vá em Settings > Branches (ou Rulesets) do seu repositório e
+   crie uma regra de proteção para a branch "main":
+     - Marque "Require a pull request before merging".
+     - Marque "Require status checks to pass before merging" e, na busca,
+       digite "verificar-api" (é o nome do job no ci.yml) e selecione.
+     - Salve a regra.
+
+2. No terminal, crie uma branch nova:
+       git checkout -b feature-multiplicacao
+
+3. O arquivo main.py já tem a rota /multiplicar/{a}/{b} pronta nesta pasta.
+   Se você quiser repetir o exercício do zero, pode apagá-la e recriar:
+
+       @app.get("/multiplicar/{a}/{b}")
+       def multiplicar(a: int, b: int):
+           return {"resultado": a * b}
+
+4. Para REPRODUZIR o passo pedido no exercício (fazer o teste falhar de
+   propósito), edite test_main.py e troque o valor esperado no teste
+   test_multiplicar, por exemplo:
+
+       assert response.json() == {"resultado": 5}   # errado de propósito (2*2 != 5)
+
+5. Faça commit e push dessa branch:
+       git add .
+       git commit -m "Adiciona rota de multiplicação (com teste quebrado de propósito)"
+       git push origin feature-multiplicacao
+
+6. No GitHub, abra um Pull Request da branch feature-multiplicacao para a main.
+7. Observe: o botão verde "Merge" vai aparecer BLOQUEADO, porque o check
+   "verificar-api" falhou (o CI pegou o teste errado). O "Guarda-Costas"
+   funcionou!
+
+8. Para finalizar com sucesso: corrija o teste localmente (volte o valor
+   esperado para {"resultado": 4}), faça commit e push na MESMA branch:
+       git add test_main.py
+       git commit -m "Corrige teste de multiplicação"
+       git push origin feature-multiplicacao
+   O Pull Request atualiza sozinho, os testes rodam de novo, ficam verdes
+   e o botão de Merge é liberado. Clique em Merge para finalizar.
+
+
+-----------------------------------------------------------
+PARTE 4 - Testando em várias versões do Python (strategy matrix)
+-----------------------------------------------------------
+Esta parte já está pronta no arquivo .github/workflows/ci.yml desta pasta.
+O bloco relevante é:
+
+    jobs:
+      verificar-api:
+        runs-on: ubuntu-latest
+        strategy:
+          matrix:
+            python-version: ['3.10', '3.11', '3.12']
+
+        steps:
+          ...
+          - name: Configurar Python ${{ matrix.python-version }}
+            uses: actions/setup-python@v5
+            with:
+              python-version: ${{ matrix.python-version }}
+
+O que isso faz, em palavras simples:
+  - "matrix" cria uma LISTA de versões do Python.
+  - O GitHub Actions roda o workflow INTEIRO uma vez para CADA versão da
+    lista (3.10, 3.11 e 3.12) automaticamente, em paralelo.
+  - A variável ${{ matrix.python-version }} troca sozinha o valor em cada
+    execução, então você não precisa copiar o arquivo YAML três vezes.
+
+Depois de atualizar a main (git checkout main / git pull) e enviar esse
+arquivo, vá na aba Actions: você verá 3 execuções do job "verificar-api"
+rodando ao mesmo tempo, uma para cada versão do Python.
+
+
+-----------------------------------------------------------
+PARTE 5 - Teste de integração (subir a API de verdade no Runner)
+-----------------------------------------------------------
+Também já está pronto no final do ci.yml:
+
+    - name: Subir a API e testar requisição (Integração)
+      run: |
+        fastapi run main.py --port 8000 &
+        sleep 3
+        curl -f http://localhost:8000/
+        curl -f http://localhost:8000/somar/10/20
+
+Explicando em palavras simples:
+  - "fastapi run main.py --port 8000 &" liga a API de verdade dentro da
+    máquina do GitHub. O "&" no final manda rodar em segundo plano, para
+    o Runner não ficar travado esperando a API "desligar".
+  - "sleep 3" espera 3 segundos para dar tempo da API terminar de ligar.
+  - "curl -f ..." é como abrir a rota no navegador, só que pelo terminal.
+    O "-f" faz o comando falhar (e o CI barrar) se a API responder com
+    erro (404, 500, etc.).
+
+Isso é chamado de "teste de caixa-preta": não olhamos o código, só
+testamos se a API responde corretamente de fora, como um usuário real
+faria.
+
+Para ver isso rodando: faça commit e push para o GitHub e abra os logs
+da aba Actions. Você vai ver a API subindo dentro da máquina virtual e os
+comandos curl retornando o JSON com sucesso.
+
+
+-----------------------------------------------------------
+RESUMO DO QUE O CI (ci.yml) FAZ, DO INÍCIO AO FIM
+-----------------------------------------------------------
+1. É disparado sempre que alguém faz push ou abre um Pull Request para a main.
+2. Repete tudo abaixo para cada versão do Python (3.10, 3.11, 3.12):
+   a) Baixa o código do repositório (checkout).
+   b) Instala a versão do Python da vez.
+   c) Instala as dependências (pip install -r requirements.txt).
+   d) Roda os testes automáticos (pytest).
+   e) Liga a API de verdade e testa com curl se ela responde.
+3. Se qualquer passo falhar, o job "verificar-api" fica vermelho e,
+   com a proteção de branch ativada, o Merge do Pull Request fica
+   bloqueado até alguém corrigir o problema.
